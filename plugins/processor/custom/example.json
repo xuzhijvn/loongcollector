@@ -1,0 +1,31 @@
+{
+    "inputs": [
+        {
+            "type": "service_mock",
+            "detail": {
+                "LogsPerSecond": 1,
+                "Fields": {
+                    "content": "{\"test_key\":\"test_value\"}"
+                }
+            }
+        }
+    ],
+    "processors": [
+        {
+            "type": "processor_custom",
+            "detail": {
+                "IgnoreError": true
+            }
+        }
+    ],
+    "aggregators": [
+        {
+            "type": "aggregator_context"
+        }
+    ],
+    "flushers": [
+        {
+            "type": "flusher_checker"
+        }
+    ]
+} 
