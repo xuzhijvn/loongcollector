@@ -16,6 +16,7 @@ package custom
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,7 @@ type ProcessorCustom struct {
 const pluginName = "processor_custom"
 
 func (p *ProcessorCustom) Init(context pipeline.Context) error {
+	logger.Info(p.context.GetRuntimeContext(), "this is", "Init")
 	p.context = context
 	p.httpClient = &http.Client{
 		Timeout: time.Second * 10,
@@ -46,10 +48,12 @@ func (p *ProcessorCustom) Init(context pipeline.Context) error {
 }
 
 func (p *ProcessorCustom) Description() string {
+	logger.Info(p.context.GetRuntimeContext(), "this is", "Description")
 	return "custom processor that can handle any data format and do any processing"
 }
 
 func (p *ProcessorCustom) Process(in *models.PipelineGroupEvents, context pipeline.PipelineContext) {
+	logger.Info(p.context.GetRuntimeContext(), "this is", "Process")
 	if in == nil || len(in.Events) == 0 {
 		return
 	}
@@ -67,6 +71,7 @@ func (p *ProcessorCustom) Process(in *models.PipelineGroupEvents, context pipeli
 }
 
 func (p *ProcessorCustom) processEvent(in *models.PipelineGroupEvents, i int) error {
+	logger.Info(p.context.GetRuntimeContext(), "this is", "processEvent")
 	switch e := in.Events[i].(type) {
 	case models.ByteArray:
 		respBody, err := p.processByteArray(e)
@@ -87,6 +92,8 @@ func (p *ProcessorCustom) processEvent(in *models.PipelineGroupEvents, i int) er
 }
 
 func (p *ProcessorCustom) processByteArray(data models.ByteArray) ([]byte, error) {
+	logger.Info(p.context.GetRuntimeContext(), "this is", "processByteArray")
+	logger.Info(p.context.GetRuntimeContext(), "request is", string(data))
 	// 调用HTTP接口
 	resp, err := p.httpClient.Post(p.URL, "application/json", bytes.NewReader(data))
 	if err != nil {
@@ -99,14 +106,17 @@ func (p *ProcessorCustom) processByteArray(data models.ByteArray) ([]byte, error
 }
 
 func (p *ProcessorCustom) ProcessLogs(logArray []*protocol.Log) []*protocol.Log {
+	logger.Info(p.context.GetRuntimeContext(), "this is", "ProcessLogs")
 	return logArray
 }
 
 func (p *ProcessorCustom) Stop() error {
+	logger.Info(p.context.GetRuntimeContext(), "this is", "Stop")
 	return nil
 }
 
 func init() {
+	logger.Info(context.Background(), "this is", "init")
 	pipeline.Processors[pluginName] = func() pipeline.Processor {
 		return &ProcessorCustom{
 			IgnoreError: true,
