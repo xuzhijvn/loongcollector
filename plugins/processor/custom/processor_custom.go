@@ -39,7 +39,6 @@ type ProcessorCustom struct {
 const pluginName = "processor_custom"
 
 func (p *ProcessorCustom) Init(context pipeline.Context) error {
-	logger.Info(p.context.GetRuntimeContext(), "this is", "Init")
 	p.context = context
 	p.httpClient = &http.Client{
 		Timeout: time.Second * 10,
