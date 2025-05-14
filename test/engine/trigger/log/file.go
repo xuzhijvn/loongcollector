@@ -16,11 +16,12 @@ package log
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/alibaba/ilogtail/pkg/logger"
+	"github.com/alibaba/ilogtail/test/config"
 	"github.com/alibaba/ilogtail/test/engine/setup"
 	"github.com/alibaba/ilogtail/test/engine/trigger"
 )
@@ -61,6 +62,10 @@ func Nginx(ctx context.Context, rate, duration int, path string) (context.Contex
 	return generateBenchmark(ctx, "nginx", path, rate, duration)
 }
 
+func ChangeRotateInterval(ctx context.Context, interval int) (context.Context, error) {
+	return context.WithValue(ctx, config.RotateIntervalKey, interval), nil
+}
+
 func generate(ctx context.Context, mode, path string, count, interval int, customKV ...string) (context.Context, error) {
 	time.Sleep(3 * time.Second)
 	customKVString := make(map[string]string)
@@ -71,11 +76,15 @@ func generate(ctx context.Context, mode, path string, count, interval int, custo
 	if err != nil {
 		return ctx, err
 	}
-	command := trigger.GetRunTriggerCommand("log", "file", "mode", mode, "path", path, "count", strconv.Itoa(count), "interval", strconv.Itoa(interval), "custom", wrapperCustomArgs(string(jsonStr)))
-	fmt.Println(command)
+	rotateInterval := 30
+	if ctx.Value(config.RotateIntervalKey) != nil {
+		rotateInterval = ctx.Value(config.RotateIntervalKey).(int)
+	}
+	command := trigger.GetRunTriggerCommand("log", "file", "mode", mode, "path", path, "count", strconv.Itoa(count), "interval", strconv.Itoa(interval), "rotate", strconv.Itoa(rotateInterval), "custom", wrapperCustomArgs(string(jsonStr)))
+	logger.Info(ctx, "Exec command", command)
 	go func() {
 		if _, err := setup.Env.ExecOnSource(ctx, command); err != nil {
-			fmt.Println(err)
+			logger.Error(ctx, "EXEC_ALARM", "ExecOnSource failed", err.Error())
 		}
 	}()
 	return ctx, nil
@@ -92,9 +101,11 @@ func generateBenchmark(ctx context.Context, mode, path string, rate, duration in
 		return ctx, err
 	}
 	command := trigger.GetRunTriggerCommand("log", "file_benchmark", "mode", mode, "path", path, "rate", strconv.Itoa(rate), "duration", strconv.Itoa(duration), "custom", wrapperCustomArgs(string(jsonStr)))
-	if _, err := setup.Env.ExecOnSource(ctx, command); err != nil {
-		return ctx, err
-	}
+	go func() {
+		if _, err := setup.Env.ExecOnSource(ctx, command); err != nil {
+			logger.Error(ctx, "EXEC_ALARM", "ExecOnSource failed", err.Error())
+		}
+	}()
 	return ctx, nil
 }
 

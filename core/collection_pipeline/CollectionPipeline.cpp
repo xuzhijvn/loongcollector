@@ -16,9 +16,9 @@
 
 #include "collection_pipeline/CollectionPipeline.h"
 
-#include <chrono>
 #include <cstdint>
 
+#include <chrono>
 #include <memory>
 #include <utility>
 
@@ -122,7 +122,6 @@ bool CollectionPipeline::Init(CollectionConfig&& config) {
         } else {
             AddPluginToGoPipeline(pluginType, detail, "inputs", mGoPipelineWithInput);
         }
-        ++mPluginCntMap["inputs"][pluginType];
     }
 
     for (size_t i = 0; i < config.mProcessors.size(); ++i) {
@@ -146,7 +145,6 @@ bool CollectionPipeline::Init(CollectionConfig&& config) {
                 AddPluginToGoPipeline(pluginType, detail, "processors", mGoPipelineWithoutInput);
             }
         }
-        ++mPluginCntMap["processors"][pluginType];
     }
 
     if (config.mAggregators.empty() && config.IsFlushingThroughGoPipelineExisted()) {
@@ -163,7 +161,6 @@ bool CollectionPipeline::Init(CollectionConfig&& config) {
         } else {
             AddPluginToGoPipeline(pluginType, detail, "aggregators", mGoPipelineWithoutInput);
         }
-        ++mPluginCntMap["aggregators"][pluginType];
     }
 
     for (size_t i = 0; i < config.mFlushers.size(); ++i) {
@@ -195,7 +192,6 @@ bool CollectionPipeline::Init(CollectionConfig&& config) {
                 AddPluginToGoPipeline(pluginType, detail, "flushers", mGoPipelineWithoutInput);
             }
         }
-        ++mPluginCntMap["flushers"][pluginType];
     }
 
     // route is only enabled in native flushing mode, thus the index in config is the same as that in mFlushers
@@ -213,7 +209,6 @@ bool CollectionPipeline::Init(CollectionConfig&& config) {
         if (!mGoPipelineWithoutInput.isNull()) {
             AddPluginToGoPipeline(pluginType, detail, "extensions", mGoPipelineWithoutInput);
         }
-        ++mPluginCntMap["extensions"][pluginType];
     }
 
     // global module must be initialized at last, since native input or flusher plugin may generate global param in Go
@@ -364,7 +359,7 @@ bool CollectionPipeline::Init(CollectionConfig&& config) {
 }
 
 void CollectionPipeline::Start() {
-    // #ifndef APSARA_UNIT_TEST_MAIN
+    TimeoutFlushManager::GetInstance()->RegisterFlushers(mName, mFlushers);
     //  TODO: 应该保证指定时间内返回，如果无法返回，将配置放入startDisabled里
     for (const auto& flusher : mFlushers) {
         flusher->Start();
@@ -386,7 +381,6 @@ void CollectionPipeline::Start() {
 
     SET_GAUGE(mStartTime,
               chrono::duration_cast<chrono::seconds>(chrono::system_clock::now().time_since_epoch()).count());
-    // #endif
     LOG_INFO(sLogger, ("pipeline start", "succeeded")("config", mName));
 }
 
@@ -444,7 +438,7 @@ bool CollectionPipeline::FlushBatch() {
     for (auto& flusher : mFlushers) {
         allSucceeded = flusher->FlushAll() && allSucceeded;
     }
-    TimeoutFlushManager::GetInstance()->ClearRecords(mName);
+    TimeoutFlushManager::GetInstance()->UnregisterFlushers(mName, mFlushers);
     return allSucceeded;
 }
 
@@ -495,7 +489,7 @@ void CollectionPipeline::MergeGoPipeline(const Json::Value& src, Json::Value& ds
     }
 }
 
-std::string CollectionPipeline::GenPluginTypeWithID(std::string pluginType, std::string pluginID) {
+string CollectionPipeline::GenPluginTypeWithID(const string& pluginType, const string& pluginID) {
     return pluginType + "/" + pluginID;
 }
 
@@ -556,9 +550,10 @@ bool CollectionPipeline::LoadGoPipelines() const {
                           "Go pipeline num", "2")("Go pipeline content", content)("config", mName));
             AlarmManager::GetInstance()->SendAlarm(CATEGORY_CONFIG_ALARM,
                                                    "Go pipeline is invalid, content: " + content + ", config: " + mName,
+                                                   mContext.GetRegion(),
                                                    mContext.GetProjectName(),
-                                                   mContext.GetLogstoreName(),
-                                                   mContext.GetRegion());
+                                                   mContext.GetConfigName(),
+                                                   mContext.GetLogstoreName());
             return false;
         }
     }
@@ -575,9 +570,10 @@ bool CollectionPipeline::LoadGoPipelines() const {
                           "Go pipeline num", "1")("Go pipeline content", content)("config", mName));
             AlarmManager::GetInstance()->SendAlarm(CATEGORY_CONFIG_ALARM,
                                                    "Go pipeline is invalid, content: " + content + ", config: " + mName,
+                                                   mContext.GetRegion(),
                                                    mContext.GetProjectName(),
-                                                   mContext.GetLogstoreName(),
-                                                   mContext.GetRegion());
+                                                   mContext.GetConfigName(),
+                                                   mContext.GetLogstoreName());
             if (!mGoPipelineWithoutInput.isNull()) {
                 LogtailPlugin::GetInstance()->UnloadPipeline(GetConfigNameOfGoPipelineWithoutInput());
             }
@@ -587,13 +583,13 @@ bool CollectionPipeline::LoadGoPipelines() const {
     return true;
 }
 
-std::string CollectionPipeline::GetNowPluginID() {
-    return std::to_string(mPluginID.load());
+string CollectionPipeline::GetNowPluginID() {
+    return to_string(mPluginID.load());
 }
 
 PluginInstance::PluginMeta CollectionPipeline::GenNextPluginMeta(bool lastOne) {
     mPluginID.fetch_add(1);
-    return PluginInstance::PluginMeta(std::to_string(mPluginID.load()));
+    return PluginInstance::PluginMeta(to_string(mPluginID.load()));
 }
 
 void CollectionPipeline::WaitAllItemsInProcessFinished() {
@@ -606,10 +602,11 @@ void CollectionPipeline::WaitAllItemsInProcessFinished() {
             LOG_ERROR(sLogger, ("pipeline stop", "too slow")("config", mName)("cost", duration));
             AlarmManager::GetInstance()->SendAlarm(CONFIG_UPDATE_ALARM,
                                                    string("pipeline stop too slow, config: ") + mName
-                                                       + "; cost:" + std::to_string(duration),
+                                                       + "; cost:" + to_string(duration),
+                                                   mContext.GetRegion(),
                                                    mContext.GetProjectName(),
-                                                   mContext.GetLogstoreName(),
-                                                   mContext.GetRegion());
+                                                   mContext.GetConfigName(),
+                                                   mContext.GetLogstoreName());
             alarmOnce = true;
         }
     }

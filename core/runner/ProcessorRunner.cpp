@@ -34,6 +34,7 @@ using namespace std;
 
 namespace logtail {
 
+thread_local uint32_t ProcessorRunner::sThreadNo;
 thread_local MetricsRecordRef ProcessorRunner::sMetricsRecordRef;
 thread_local CounterPtr ProcessorRunner::sInGroupsCnt;
 thread_local CounterPtr ProcessorRunner::sInEventsCnt;
@@ -89,6 +90,7 @@ void ProcessorRunner::Run(uint32_t threadNo) {
     LOG_INFO(sLogger, ("processor runner", "started")("thread no", threadNo));
 
     // thread local metrics should be initialized in each thread
+    sThreadNo = threadNo;
     WriteMetrics::GetInstance()->PrepareMetricsRecordRef(
         sMetricsRecordRef,
         MetricCategory::METRIC_CATEGORY_RUNNER,
@@ -169,9 +171,10 @@ void ProcessorRunner::Run(uint32_t threadNo) {
                                                                     "failed to serialize event group: " + errorMsg
                                                                         + "\taction: discard data\tconfig: "
                                                                         + configName,
+                                                                    pipeline->GetContext().GetRegion(),
                                                                     pipeline->GetContext().GetProjectName(),
-                                                                    pipeline->GetContext().GetLogstoreName(),
-                                                                    pipeline->GetContext().GetRegion());
+                                                                    configName,
+                                                                    pipeline->GetContext().GetLogstoreName());
                         continue;
                     }
                     LogtailPlugin::GetInstance()->ProcessLogGroup(

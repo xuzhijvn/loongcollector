@@ -113,7 +113,8 @@ void ProcessorPromRelabelMetricNativeUnittest::TestProcess() {
             ],
             "external_labels": {
                 "test_key1": "test_value1",
-                "test_key2": "test_value2"
+                "test_key2": "test_value2",
+                "test_key3": ""
             }
         }
     )";
@@ -133,7 +134,7 @@ test_metric3{k1="v1",k2="v2"} 9.9410452992e+10
   test_metric4{k1="v1",k2="v2"} 9.9410452992e+10 1715829785083
   test_metric5{k1="v1", k2="v2" } 9.9410452992e+10 1715829785083
 test_metric6{k1="v1",k2="v2",} 9.9410452992e+10 1715829785083
-test_metric7{k1="v1",k3="2", } 9.9410452992e+10 1715829785083  
+test_metric7{k1="v1",k3="", } 9.9410452992e+10 1715829785083  
 test_metric8{k1="v1", k3="v2", } 9.9410452992e+10 1715829785083
 
 # end
@@ -154,11 +155,14 @@ test_metric8{k1="v1", k3="v2", } 9.9410452992e+10 1715829785083
     APSARA_TEST_EQUAL("test_metric5", eventGroup.GetEvents().at(4).Cast<MetricEvent>().GetName());
     APSARA_TEST_EQUAL("test_metric6", eventGroup.GetEvents().at(5).Cast<MetricEvent>().GetName());
     APSARA_TEST_EQUAL("test_metric7", eventGroup.GetEvents().at(6).Cast<MetricEvent>().GetName());
+    // test_metric7 k3 label is removed because value is empty
+    APSARA_TEST_EQUAL(false, eventGroup.GetEvents().at(6).Cast<MetricEvent>().HasTag("k3"));
     // test_metric8 is dropped by relabel config
 
     // check external labels
     APSARA_TEST_EQUAL("test_value1", eventGroup.GetEvents().at(0).Cast<MetricEvent>().GetTag("test_key1"));
     APSARA_TEST_EQUAL("test_value2", eventGroup.GetEvents().at(0).Cast<MetricEvent>().GetTag("test_key2"));
+    APSARA_TEST_EQUAL(false, eventGroup.GetEvents().at(0).Cast<MetricEvent>().HasTag("test_key3"));
 }
 
 void ProcessorPromRelabelMetricNativeUnittest::TestAddAutoMetrics() {
@@ -215,6 +219,7 @@ test_metric8{k1="v1", k3="v2", } 9.9410452992e+10 1715829785083
     eventGroup.SetMetadata(EventGroupMetaKey::PROMETHEUS_SCRAPE_RESPONSE_SIZE, ToString(2325));
     eventGroup.SetMetadata(EventGroupMetaKey::PROMETHEUS_UP_STATE, ToString(true));
     eventGroup.SetMetadata(EventGroupMetaKey::PROMETHEUS_SCRAPE_STATE, string("OK"));
+    eventGroup.SetMetadata(EventGroupMetaKey::PROMETHEUS_STREAM_ID, string("123"));
     eventGroup.SetTag(string("instance"), "localhost:8080");
     eventGroup.SetTag(string("job"), "test_job");
     processor.UpdateAutoMetrics(eventGroup, autoMetric);
@@ -235,6 +240,7 @@ test_metric8{k1="v1", k3="v2", } 9.9410452992e+10 1715829785083
     APSARA_TEST_EQUAL(1, eventGroup.GetEvents().at(14).Cast<MetricEvent>().GetValue<UntypedSingleValue>()->mValue);
     APSARA_TEST_EQUAL("localhost:8080", eventGroup.GetEvents().at(14).Cast<MetricEvent>().GetTag("instance"));
     APSARA_TEST_EQUAL("test_job", eventGroup.GetEvents().at(14).Cast<MetricEvent>().GetTag("job"));
+    APSARA_TEST_EQUAL("123", eventGroup.GetEvents().at(14).Cast<MetricEvent>().GetTag("lc_target_hash"));
 }
 
 void ProcessorPromRelabelMetricNativeUnittest::TestHonorLabels() {
@@ -278,16 +284,15 @@ test_metric8{k1="v1", k3="v2", } 9.9410452992e+10 1715829785083
     eventGroup.SetTag(string("k3"), string("v3"));
     APSARA_TEST_EQUAL((size_t)8, eventGroup.GetEvents().size());
     auto targetTags = eventGroup.GetTags();
-    auto toDelete = processor.GetToDeleteTargetLabels(targetTags);
     // honor_labels is true
-    processor.ProcessEvent(eventGroup.MutableEvents()[0], targetTags, toDelete);
+    processor.ProcessEvent(eventGroup.MutableEvents()[0], targetTags);
     APSARA_TEST_EQUAL("v3", eventGroup.GetEvents().at(0).Cast<MetricEvent>().GetTag(string("k3")));
-    processor.ProcessEvent(eventGroup.MutableEvents()[6], targetTags, toDelete);
+    processor.ProcessEvent(eventGroup.MutableEvents()[6], targetTags);
     APSARA_TEST_EQUAL("2", eventGroup.GetEvents().at(6).Cast<MetricEvent>().GetTag(string("k3")).to_string());
 
     // honor_labels is false
     processor.mScrapeConfigPtr->mHonorLabels = false;
-    processor.ProcessEvent(eventGroup.MutableEvents()[7], targetTags, toDelete);
+    processor.ProcessEvent(eventGroup.MutableEvents()[7], targetTags);
     APSARA_TEST_EQUAL("v3", eventGroup.GetEvents().at(7).Cast<MetricEvent>().GetTag(string("k3")).to_string());
     APSARA_TEST_EQUAL("v2", eventGroup.GetEvents().at(7).Cast<MetricEvent>().GetTag(string("exported_k3")).to_string());
 }

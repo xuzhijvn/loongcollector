@@ -14,6 +14,8 @@
 
 #include "runner/sink/http/HttpSink.h"
 
+#include <optional>
+
 #include "app_config/AppConfig.h"
 #include "collection_pipeline/plugin/interface/HttpFlusher.h"
 #include "collection_pipeline/queue/QueueKeyManager.h"
@@ -93,7 +95,7 @@ void HttpSink::Run() {
         unique_ptr<HttpSinkRequest> request;
         if (mQueue.WaitAndPop(request, 500)) {
             ADD_COUNTER(mInItemsTotal, 1);
-            LOG_DEBUG(sLogger,
+            LOG_TRACE(sLogger,
                       ("got item from flusher runner, item address", request->mItem)(
                           "config-flusher-dst", QueueKeyManager::GetInstance()->GetName(request->mItem->mQueueKey))(
                           "wait time",
@@ -131,7 +133,10 @@ bool HttpSink::AddRequestToClient(unique_ptr<HttpSinkRequest>&& request) {
                                    headers,
                                    request->mTimeout,
                                    AppConfig::GetInstance()->IsHostIPReplacePolicyEnabled(),
-                                   AppConfig::GetInstance()->GetBindInterface());
+                                   AppConfig::GetInstance()->GetBindInterface(),
+                                   false,
+                                   std::nullopt,
+                                   std::move(request->mSocket));
     if (curl == nullptr) {
         request->mItem->mStatus = SendingStatus::IDLE;
         request->mResponse.SetNetworkStatus(NetworkCode::Other, "failed to init curl handler");
@@ -188,7 +193,7 @@ void HttpSink::DoRun() {
         bool hasRequest = false;
         while (mQueue.TryPop(request)) {
             ADD_COUNTER(mInItemsTotal, 1);
-            LOG_DEBUG(sLogger,
+            LOG_TRACE(sLogger,
                       ("got item from flusher runner, item address", request->mItem)(
                           "config-flusher-dst", QueueKeyManager::GetInstance()->GetName(request->mItem->mQueueKey))(
                           "wait time",
@@ -262,7 +267,7 @@ void HttpSink::HandleCompletedRequests(int& runningHandlers) {
                     request->mResponse.SetNetworkStatus(NetworkCode::Ok, "");
                     request->mResponse.SetStatusCode(statusCode);
                     request->mResponse.SetResponseTime(responseTimeMs);
-                    LOG_DEBUG(sLogger,
+                    LOG_TRACE(sLogger,
                               ("send http request succeeded, item address",
                                request->mItem)("config-flusher-dst",
                                                QueueKeyManager::GetInstance()->GetName(request->mItem->mQueueKey))(

@@ -20,9 +20,16 @@ using namespace std;
 
 namespace logtail {
 
+Timer::~Timer() {
+    Stop();
+}
+
 void Timer::Init() {
     {
         lock_guard<mutex> lock(mThreadRunningMux);
+        if (mIsThreadRunning) {
+            return;
+        }
         mIsThreadRunning = true;
     }
     mThreadRes = async(launch::async, &Timer::Run, this);
@@ -31,6 +38,9 @@ void Timer::Init() {
 void Timer::Stop() {
     {
         lock_guard<mutex> lock(mThreadRunningMux);
+        if (!mIsThreadRunning) {
+            return;
+        }
         mIsThreadRunning = false;
     }
     mCV.notify_one();
@@ -87,5 +97,14 @@ void Timer::Run() {
         }
     }
 }
+
+#ifdef APSARA_UNIT_TEST_MAIN
+void Timer::Clear() {
+    lock_guard<mutex> lock(mQueueMux);
+    while (!mQueue.empty()) {
+        mQueue.pop();
+    }
+}
+#endif
 
 } // namespace logtail

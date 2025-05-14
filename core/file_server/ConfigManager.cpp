@@ -105,17 +105,11 @@ ParseConfResult ParseConfig(const std::string& configName, Json::Value& jsonRoot
         fullPath = GetProcessExecutionDir() + configName;
     }
 
-    ifstream is;
-    is.open(fullPath.c_str());
-    if (!is) { // https://horstmann.com/cpp/pitfalls.html
-        return CONFIG_NOT_EXIST;
-    }
     std::string buffer;
-    try {
-        buffer.assign(std::istreambuf_iterator<char>(is), std::istreambuf_iterator<char>());
-    } catch (const std::ios_base::failure& e) {
+    if (FileReadResult::kOK != ReadFileContent(fullPath, buffer)) {
         return CONFIG_NOT_EXIST;
     }
+
     if (!IsValidJson(buffer.c_str(), buffer.length())) {
         return CONFIG_INVALID_FORMAT;
     }
@@ -142,23 +136,27 @@ bool ConfigManager::RegisterHandlersRecursively(const std::string& path,
         return false;
     }
     bool result = false;
-    if (checkTimeout && config.first->IsTimeout(path))
+    if (checkTimeout && config.first->IsTimeout(path)) {
         return result;
+    }
 
-    if (!config.first->IsDirectoryInBlacklist(path))
+    if (!config.first->IsDirectoryInBlacklist(path)) {
         result = EventDispatcher::GetInstance()->RegisterEventHandler(path, config, mSharedHandler);
+    }
 
-    if (!result)
+    if (!result) {
         return result;
+    }
 
     fsutil::Dir dir(path);
     if (!dir.Open()) {
         auto err = GetErrno();
         AlarmManager::GetInstance()->SendAlarm(LOGDIR_PERMISSION_ALARM,
                                                string("Failed to open dir : ") + path + ";\terrno : " + ToString(err),
+                                               config.second->GetRegion(),
                                                config.second->GetProjectName(),
-                                               config.second->GetLogstoreName(),
-                                               config.second->GetRegion());
+                                               config.second->GetConfigName(),
+                                               config.second->GetLogstoreName());
 
         LOG_ERROR(sLogger, ("Open dir fail", path.c_str())("errno", ErrnoToString(err)));
         return false;
@@ -329,9 +327,10 @@ void ConfigManager::RegisterWildcardPath(const FileDiscoveryConfig& config, cons
         auto err = GetErrno();
         AlarmManager::GetInstance()->SendAlarm(LOGDIR_PERMISSION_ALARM,
                                                string("Failed to open dir : ") + path + ";\terrno : " + ToString(err),
+                                               config.second->GetRegion(),
                                                config.second->GetProjectName(),
-                                               config.second->GetLogstoreName(),
-                                               config.second->GetRegion());
+                                               config.second->GetConfigName(),
+                                               config.second->GetLogstoreName());
         LOG_WARNING(sLogger, ("Open dir fail", path.c_str())("errno", err));
         return;
     }
@@ -346,9 +345,10 @@ void ConfigManager::RegisterWildcardPath(const FileDiscoveryConfig& config, cons
                                                    string("too many sub directoried for path:" + path
                                                           + " dirCount: " + ToString(dirCount) + " basePath"
                                                           + config.first->GetBasePath()),
+                                                   config.second->GetRegion(),
                                                    config.second->GetProjectName(),
-                                                   config.second->GetLogstoreName(),
-                                                   config.second->GetRegion());
+                                                   config.second->GetConfigName(),
+                                                   config.second->GetLogstoreName());
             break;
         }
         if (!ent.IsDir())
@@ -493,9 +493,10 @@ bool ConfigManager::RegisterHandlersWithinDepth(const std::string& path,
         int err = GetErrno();
         AlarmManager::GetInstance()->SendAlarm(LOGDIR_PERMISSION_ALARM,
                                                string("Failed to open dir : ") + path + ";\terrno : " + ToString(err),
+                                               config.second->GetRegion(),
                                                config.second->GetProjectName(),
-                                               config.second->GetLogstoreName(),
-                                               config.second->GetRegion());
+                                               config.second->GetConfigName(),
+                                               config.second->GetLogstoreName());
 
         LOG_ERROR(sLogger, ("Open dir error: ", path.c_str())("errno", err));
         return false;
@@ -544,9 +545,10 @@ bool ConfigManager::RegisterDescendants(const string& path, const FileDiscoveryC
         auto err = GetErrno();
         AlarmManager::GetInstance()->SendAlarm(LOGDIR_PERMISSION_ALARM,
                                                string("Failed to open dir : ") + path + ";\terrno : " + ToString(err),
+                                               config.second->GetRegion(),
                                                config.second->GetProjectName(),
-                                               config.second->GetLogstoreName(),
-                                               config.second->GetRegion());
+                                               config.second->GetConfigName(),
+                                               config.second->GetLogstoreName());
         LOG_ERROR(sLogger, ("Open dir error: ", path.c_str())("errno", err));
         return false;
     }
@@ -660,9 +662,10 @@ FileDiscoveryConfig ConfigManager::FindBestMatch(const string& path, const strin
                 path + '/' + name + " include in multi config, best and oldest match: "
                     + prevMatch.second->GetProjectName() + ',' + prevMatch.second->GetLogstoreName() + ','
                     + prevMatch.second->GetConfigName() + ", allmatch: " + logNameList,
+                (*iter).second->GetRegion(),
                 (*iter).second->GetProjectName(),
-                (*iter).second->GetLogstoreName(),
-                (*iter).second->GetRegion());
+                (*iter).second->GetConfigName(),
+                (*iter).second->GetLogstoreName());
         }
     }
     {
@@ -804,9 +807,10 @@ int32_t ConfigManager::FindMatchWithForceFlag(std::vector<FileDiscoveryConfig>& 
                 path + '/' + name + " include in multi config, best and oldest match: "
                     + prevMatch.second->GetProjectName() + ',' + prevMatch.second->GetLogstoreName() + ','
                     + prevMatch.second->GetConfigName() + ", allmatch: " + logNameList,
+                (*iter).second->GetRegion(),
                 (*iter).second->GetProjectName(),
-                (*iter).second->GetLogstoreName(),
-                (*iter).second->GetRegion());
+                (*iter).second->GetConfigName(),
+                (*iter).second->GetLogstoreName());
         }
     }
     if (prevMatch.first) {
@@ -842,9 +846,10 @@ void ConfigManager::SendAllMatchAlarm(const string& path,
             TOO_MANY_CONFIG_ALARM,
             path + '/' + name + " include in too many configs:" + ToString(allConfig.size())
                 + ", max multi config size : " + ToString(maxMultiConfigSize) + ", allmatch: " + allConfigNames,
+            (*iter).second->GetRegion(),
             (*iter).second->GetProjectName(),
-            (*iter).second->GetLogstoreName(),
-            (*iter).second->GetRegion());
+            (*iter).second->GetConfigName(),
+            (*iter).second->GetLogstoreName());
 }
 
 void ConfigManager::AddHandlerToDelete(EventHandler* handler) {
@@ -1012,6 +1017,9 @@ void ConfigManager::GetContainerStoppedEvents(std::vector<Event*>& eventVec) {
             continue;
         }
         Event* pStoppedEvent = new Event(iter->mRealBaseDir, "", EVENT_ISDIR | EVENT_CONTAINER_STOPPED, -1, 0);
+        pStoppedEvent->SetConfigName(cmd->mConfigName);
+        pStoppedEvent->SetContainerID(containerInfo.mID);
+        iter->mStopped = true;
         LOG_DEBUG(
             sLogger,
             ("GetContainerStoppedEvent Type", pStoppedEvent->GetType())("Source", pStoppedEvent->GetSource())(

@@ -70,11 +70,6 @@ std::string ToString(const std::vector<std::string>& vec) {
     return ret;
 }
 
-template <>
-bool StringTo<bool>(const std::string& str) {
-    return str == "true";
-}
-
 std::vector<std::string> SplitString(const std::string& str, const std::string& delim) {
     std::vector<std::string> tokens;
     boost::split(tokens, str, boost::is_any_of(delim));
@@ -361,6 +356,14 @@ void RemoveFilePathTrailingSlash(std::string& filePath) {
     boost::filesystem::path path(filePath);
     path.remove_trailing_separator();
     filePath = path.string();
+}
+
+bool IsInt(const char* sz) {
+    bool ok = (sz != nullptr && *sz != '\0');
+    for (const auto* it = sz; ok && *it; ++it) {
+        ok = (0 != std::isdigit(*it));
+    }
+    return ok;
 }
 
 } // namespace logtail

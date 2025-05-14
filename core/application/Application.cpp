@@ -48,7 +48,6 @@
 #include "plugin/flusher/sls/DiskBufferWriter.h"
 #include "plugin/flusher/sls/FlusherSLS.h"
 #include "plugin/input/InputFeedbackInterfaceRegistry.h"
-#include "prometheus/PrometheusInputRunner.h"
 #include "runner/FlusherRunner.h"
 #include "runner/ProcessorRunner.h"
 #include "runner/sink/http/HttpSink.h"
@@ -116,7 +115,6 @@ void Application::Init() {
     LoongCollectorMonitor::GetInstance();
 #ifdef __ENTERPRISE__
     EnterpriseConfigProvider::GetInstance()->Init("enterprise");
-    EnterpriseConfigProvider::GetInstance()->LoadRegionConfig();
     if (GlobalConf::Instance()->mStartWorkerStatus == "Crash") {
         AlarmManager::GetInstance()->SendAlarm(LOGTAIL_CRASH_ALARM, "Logtail Restart");
     }
@@ -127,7 +125,7 @@ void Application::Init() {
         AlarmManager::GetInstance()->SendAlarm(LOGTAIL_CRASH_STACK_ALARM, backTraceStr);
     }
     if (BOOL_FLAG(ilogtail_disable_core)) {
-        InitCrashBackTrace();
+        ResetCrashBackTrace();
     }
 #endif
     // override process related params if designated by user explicitly
@@ -304,6 +302,7 @@ void Application::Start() { // GCOVR_EXCL_START
             SenderQueueManager::GetInstance()->ClearUnusedQueues();
             lastQueueGCTime = curTime;
         }
+        CollectionPipelineManager::GetInstance()->InputRunnerEventGC();
         if (curTime - lastUpdateMetricTime >= 40) {
             CheckCriticalCondition(curTime);
             lastUpdateMetricTime = curTime;
@@ -325,7 +324,6 @@ void Application::Start() { // GCOVR_EXCL_START
 
         // destruct event handlers here so that it will not block file reading task
         ConfigManager::GetInstance()->DeleteHandlers();
-        PrometheusInputRunner::GetInstance()->CheckGC();
 
         this_thread::sleep_for(chrono::seconds(1));
     }
@@ -378,6 +376,8 @@ void Application::Exit() {
 
     // TODO: make it common
     FlusherSLS::RecycleResourceIfNotUsed();
+
+    CollectionPipelineManager::GetInstance()->ClearAllPipelines();
 
 #if defined(_MSC_VER)
     ReleaseWindowsSignalObject();

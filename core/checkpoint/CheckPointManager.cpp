@@ -188,8 +188,9 @@ void CheckPointManager::LoadDirCheckPoint(const Json::Value& root) {
     }
 }
 void CheckPointManager::LoadFileCheckPoint(const Json::Value& root) {
-    if (root.isMember("check_point") == false)
+    if (root.isMember("check_point") == false) {
         return;
+    }
     const Json::Value::Members& fileKeyNames = root["check_point"].getMemberNames();
     mReaderCount = fileKeyNames.size();
     for (size_t index = 0; index < fileKeyNames.size(); ++index) {
@@ -198,7 +199,10 @@ void CheckPointManager::LoadFileCheckPoint(const Json::Value& root) {
         int32_t update_time = meta["update_time"].asInt();
         // use inode comparison instead
         try {
-            int64_t offset = StringTo<int64_t>(meta["offset"].asString());
+            int64_t offset{};
+            if (!StringTo(meta["offset"].asString(), offset)) {
+                throw runtime_error("offset is not a number");
+            }
             DevInode devInode;
             uint32_t sigSize = 0;
             uint64_t sigHash = 0;
@@ -206,6 +210,7 @@ void CheckPointManager::LoadFileCheckPoint(const Json::Value& root) {
             string realFilePath;
             int32_t fileOpenFlag = 0; // default, we close file ptr
             int32_t containerStopped = 0;
+            string containerID;
             int32_t lastForceRead = 0;
             int32_t idxInReaderArray = LogFileReader::CHECKPOINT_IDX_OF_NEW_READER_IN_ARRAY;
             if (meta.isMember("real_file_name")) {
@@ -242,6 +247,9 @@ void CheckPointManager::LoadFileCheckPoint(const Json::Value& root) {
             if (meta.isMember("container_stopped")) {
                 containerStopped = meta["container_stopped"].asInt();
             }
+            if (meta.isMember("container_id")) {
+                containerID = meta["container_id"].asString();
+            }
             if (meta.isMember("last_force_read")) {
                 lastForceRead = meta["last_force_read"].asInt();
             }
@@ -267,6 +275,7 @@ void CheckPointManager::LoadFileCheckPoint(const Json::Value& root) {
                                                  realFilePath,
                                                  fileOpenFlag != 0,
                                                  containerStopped != 0,
+                                                 containerID,
                                                  lastForceRead != 0);
                 ptr->mLastUpdateTime = update_time;
                 ptr->mIdxInReaderArray = idxInReaderArray;
@@ -300,6 +309,7 @@ void CheckPointManager::LoadFileCheckPoint(const Json::Value& root) {
                                                      realFilePath,
                                                      fileOpenFlag != 0,
                                                      containerStopped != 0,
+                                                     containerID,
                                                      lastForceRead != 0);
                     ptr->mLastUpdateTime = update_time;
                     ptr->mIdxInReaderArray = idxInReaderArray;
@@ -345,6 +355,7 @@ bool CheckPointManager::DumpCheckPointToLocal() {
             leaf["dev"] = Json::Value(Json::UInt64(checkPointPtr->mDevInode.dev));
             leaf["file_open"] = Json::Value(checkPointPtr->mFileOpenFlag ? 1 : 0);
             leaf["container_stopped"] = Json::Value(checkPointPtr->mContainerStopped ? 1 : 0);
+            leaf["container_id"] = Json::Value(checkPointPtr->mContainerID);
             leaf["last_force_read"] = Json::Value(checkPointPtr->mLastForceRead ? 1 : 0);
             leaf["config_name"] = Json::Value(checkPointPtr->mConfigName);
             // forward compatible
@@ -375,6 +386,7 @@ bool CheckPointManager::DumpCheckPointToLocal() {
             leaf["dev"] = Json::Value(Json::UInt64(checkPointPtr->mDevInode.dev));
             leaf["file_open"] = Json::Value(checkPointPtr->mFileOpenFlag ? 1 : 0);
             leaf["container_stopped"] = Json::Value(checkPointPtr->mContainerStopped ? 1 : 0);
+            leaf["container_id"] = Json::Value(checkPointPtr->mContainerID);
             leaf["last_force_read"] = Json::Value(checkPointPtr->mLastForceRead ? 1 : 0);
             leaf["config_name"] = Json::Value(checkPointPtr->mConfigName);
             // forward compatible
