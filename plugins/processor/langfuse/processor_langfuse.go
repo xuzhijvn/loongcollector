@@ -23,6 +23,7 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
 	"github.com/alibaba/ilogtail/pkg/logger"
 	"github.com/alibaba/ilogtail/pkg/models"
@@ -31,10 +32,20 @@ import (
 	"github.com/alibaba/ilogtail/pkg/protocol/decoder/opentelemetry"
 )
 
+// OtlpOutputFormat defines the output format for OTLP traces
+type OtlpOutputFormat string
+
+const (
+	OtlpOutputFormatNone  OtlpOutputFormat = "none"  // No OTLP output
+	OtlpOutputFormatProto OtlpOutputFormat = "proto" // Protobuf format
+	OtlpOutputFormatJSON  OtlpOutputFormat = "json"  // JSON format
+)
+
 // ProcessorLangfuse converts JSON trace data to Langfuse-compatible OTLP format
 type ProcessorLangfuse struct {
-	ServiceName string // Service name to add to resource attributes
-	IgnoreError bool   // Whether to ignore processing errors
+	ServiceName string           // Service name to add to resource attributes
+	IgnoreError bool             // Whether to ignore processing errors
+	OtlpFormat  OtlpOutputFormat // OTLP output format (none/proto/json)
 
 	context pipeline.Context
 }
@@ -63,6 +74,9 @@ func (p *ProcessorLangfuse) Init(context pipeline.Context) error {
 	// Set default values
 	if p.ServiceName == "" {
 		p.ServiceName = "loongcollector"
+	}
+	if p.OtlpFormat == "" {
+		p.OtlpFormat = OtlpOutputFormatNone
 	}
 
 	return nil
@@ -153,14 +167,30 @@ func (p *ProcessorLangfuse) convertByteArray(data models.ByteArray) ([]models.Pi
 		}
 	}
 
-	// Convert to PipelineGroupEvents
-	groupEvents, err := opentelemetry.ConvertOtlpTracesToGroupEvents(traces)
-	if err != nil || len(groupEvents) == 0 {
-		return nil, fmt.Errorf("failed to convert OTLP trace to group events: %v", err)
+	// Handle OTLP output format
+	request := ptraceotlp.NewExportRequestFromTraces(traces)
+	var bytes []byte
+
+	switch p.OtlpFormat {
+	case OtlpOutputFormatNone:
+		// Convert to PipelineGroupEvents
+		groupEvents, err := opentelemetry.ConvertOtlpTracesToGroupEvents(traces)
+		if err != nil || len(groupEvents) == 0 {
+			return nil, fmt.Errorf("failed to convert OTLP trace to group events: %v", err)
+		}
+		return groupEvents[0].Events, nil
+	case OtlpOutputFormatProto:
+		bytes, err = request.MarshalProto()
+	case OtlpOutputFormatJSON:
+		bytes, err = request.MarshalJSON()
+	default:
+		return nil, fmt.Errorf("unsupported OTLP output format: %s", p.OtlpFormat)
 	}
 
-	// Return all converted events
-	return groupEvents[0].Events, nil
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal OTLP trace: %v", err)
+	}
+	return []models.PipelineEvent{models.NewByteArray(bytes)}, nil
 }
 
 func (p *ProcessorLangfuse) convertLog(log *models.Log) ([]models.PipelineEvent, error) {
@@ -485,6 +515,7 @@ func init() {
 		return &ProcessorLangfuse{
 			ServiceName: "loongcollector",
 			IgnoreError: true,
+			OtlpFormat:  OtlpOutputFormatNone,
 		}
 	}
 }
