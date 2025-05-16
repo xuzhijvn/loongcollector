@@ -52,7 +52,6 @@ type ProcessorLangfuse struct {
 
 // TraceData represents the input JSON object structure
 type TraceData struct {
-	ID         string                 `json:"_id"`
 	Attributes map[string]interface{} `json:"attributes"`
 	Context    map[string]interface{} `json:"context"`
 	EndTime    string                 `json:"end_time"`
@@ -146,7 +145,7 @@ func (p *ProcessorLangfuse) convertByteArray(data models.ByteArray) ([]models.Pi
 	// Try to parse the JSON data
 	var traceData TraceData
 	err := json.Unmarshal(data, &traceData)
-	if err == nil && traceData.ID != "" {
+	if err == nil {
 		// Convert object to Span
 		if err := p.addSpanFromTraceData(traceData, scopeSpans); err != nil {
 			return nil, fmt.Errorf("failed to create span from JSON object: %v", err)
