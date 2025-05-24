@@ -23,6 +23,7 @@ import (
 
 	"github.com/IBM/sarama"
 
+	"github.com/alibaba/ilogtail/pkg/kafkacommon"
 	"github.com/alibaba/ilogtail/pkg/logger"
 	"github.com/alibaba/ilogtail/pkg/models"
 	"github.com/alibaba/ilogtail/pkg/pipeline"
@@ -55,7 +56,7 @@ type InputKafka struct {
 	DisableUncompress bool
 
 	// Authentication using SASL/PLAIN
-	Authentication Authentication
+	Authentication kafkacommon.Authentication
 
 	ready               chan bool
 	readyCloser         sync.Once
