@@ -39,6 +39,8 @@ const (
 
 	ContentKey = "content"
 	BodyKey    = ContentKey
+
+	KafkaMsgKey = "kafkaMsgKey"
 )
 
 var (

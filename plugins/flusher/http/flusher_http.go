@@ -44,12 +44,14 @@ const (
 
 	contentTypeHeader     = "Content-Type"
 	defaultContentType    = "application/octet-stream"
+	protobufContentType   = "application/x-protobuf"
+	jsonContentType       = "application/json"
 	contentEncodingHeader = "Content-Encoding"
 )
 
 var contentTypeMaps = map[string]string{
-	converter.EncodingJSON:     "application/json",
-	converter.EncodingProtobuf: defaultContentType,
+	converter.EncodingJSON:     jsonContentType,
+	converter.EncodingProtobuf: protobufContentType,
 	converter.EncodingNone:     defaultContentType,
 	converter.EncodingCustom:   defaultContentType,
 }

@@ -54,6 +54,9 @@ type InputKafka struct {
 	FieldsExtend      bool
 	DisableUncompress bool
 
+	// Authentication using SASL/PLAIN
+	Authentication Authentication
+
 	ready               chan bool
 	readyCloser         sync.Once
 	consumerGroupClient sarama.ConsumerGroup
@@ -108,12 +111,10 @@ func (k *InputKafka) Init(context pipeline.Context) (int, error) {
 	}
 	config.Consumer.Return.Errors = true
 
-	if k.SASLUsername != "" && k.SASLPassword != "" {
-		logger.Infof(k.context.GetRuntimeContext(), "Using SASL auth with username '%s',",
-			k.SASLUsername)
-		config.Net.SASL.User = k.SASLUsername
-		config.Net.SASL.Password = k.SASLPassword
-		config.Net.SASL.Enable = true
+	// configure Authentication
+	err = k.Authentication.ConfigureAuthentication(config)
+	if err != nil {
+		return 0, err
 	}
 
 	switch strings.ToLower(k.Offset) {
@@ -261,6 +262,12 @@ func (k *InputKafka) onMessage(msg *sarama.ConsumerMessage) {
 			if err != nil {
 				logger.Warning(k.context.GetRuntimeContext(), "DECODE_MESSAGE_FAIL_ALARM", "decode message failed", err)
 				return
+			}
+			kafkaKey := string(msg.Key)
+			for _, group := range data {
+				if len(kafkaKey) > 0 {
+					group.Group.Metadata.Add(models.KafkaMsgKey, kafkaKey)
+				}
 			}
 			k.collectorV2.CollectList(data...)
 		}
