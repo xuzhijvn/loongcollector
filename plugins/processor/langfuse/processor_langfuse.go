@@ -113,15 +113,15 @@ func (p *ProcessorLangfuse) convertByteArray(data models.ByteArray, group *model
 			converter = GetTraceConverter(p.context, v)
 			if converter == nil {
 				logger.Error(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "no converter found for kafka message key", "key", v)
-				return []models.PipelineEvent{data}, nil
+				return nil, fmt.Errorf("no converter found for kafka message key: %s", v)
 			}
 		} else {
 			logger.Error(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "no kafka message key found in group metadata")
-			return []models.PipelineEvent{data}, nil
+			return nil, fmt.Errorf("no kafka message key found in group metadata")
 		}
 	} else {
 		logger.Error(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "no group metadata found")
-		return []models.PipelineEvent{data}, nil
+		return nil, fmt.Errorf("no group metadata found")
 	}
 
 	traces, err := converter.Convert(data)
