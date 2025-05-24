@@ -110,6 +110,30 @@ func createObjectTestData() string {
 	return testData
 }
 
+// Create test data for JSON object format
+func createAiInterfaceObjectTestData() string {
+	testData := `{
+    "attributes": {
+      "message_id": "01JVXBKBYHDPTW5QBQ53XG4HPB",
+      "session_id": "aiinterface-test01",
+      "conversation_id": "aiinterface-test01",
+      "app_id": "000104"
+    },
+    "start_time": 1747963195170,
+    "context": {
+      "trace_id": "aiinterface-trace-test",
+      "span_id": "59fc3f8f-356e-4536-af9f-1a443a119a9b"
+    },
+    "name": "ai-interface-168.64.26.52_2_1",
+    "end_time": 1747963195369,
+    "status": {
+      "status_code": "OK"
+    },
+    "kind": "aiinterfaceTrace"
+  }`
+	return testData
+}
+
 // Test processing JSON array format data
 func TestProcessorLangfuse_ProcessArray(t *testing.T) {
 	// Prepare test data
@@ -170,6 +194,7 @@ func TestProcessorLangfuse_ProcessObject(t *testing.T) {
 		Group:  models.NewGroup(models.NewMetadata(), models.NewTags()),
 		Events: []models.PipelineEvent{models.ByteArray(testData)},
 	}
+	inputGroup.Group.Metadata.Add(models.KafkaMsgKey, KafkaMsgKeyHiAgentTrace)
 	context := helper.NewObservePipelineContext(10)
 	// Create test context
 	processor.Process(inputGroup, context)

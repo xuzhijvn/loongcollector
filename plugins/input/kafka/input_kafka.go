@@ -263,6 +263,12 @@ func (k *InputKafka) onMessage(msg *sarama.ConsumerMessage) {
 				logger.Warning(k.context.GetRuntimeContext(), "DECODE_MESSAGE_FAIL_ALARM", "decode message failed", err)
 				return
 			}
+			kafkaKey := string(msg.Key)
+			for _, group := range data {
+				if len(kafkaKey) > 0 {
+					group.Group.Metadata.Add(models.KafkaMsgKey, kafkaKey)
+				}
+			}
 			k.collectorV2.CollectList(data...)
 		}
 	}

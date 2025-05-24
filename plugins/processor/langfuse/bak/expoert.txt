@@ -1,5 +1,4 @@
     {
-        "_id": "8-DUaJQBVbNa3ZRbYAev",
         "attributes": {
             "app_id": "cu3ie1tcf7d5jvs1ve60",
             "conversation_id": "01JHMAFPCKXQP8P865DW34SQ6V",

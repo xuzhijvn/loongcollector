@@ -15,21 +15,14 @@
 package langfuse
 
 import (
-	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
-
-	"go.opentelemetry.io/collector/pdata/pcommon"
-	"go.opentelemetry.io/collector/pdata/ptrace"
-	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
 	"github.com/alibaba/ilogtail/pkg/logger"
 	"github.com/alibaba/ilogtail/pkg/models"
 	"github.com/alibaba/ilogtail/pkg/pipeline"
 	"github.com/alibaba/ilogtail/pkg/protocol"
 	"github.com/alibaba/ilogtail/pkg/protocol/decoder/opentelemetry"
+	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 )
 
 // OtlpOutputFormat defines the output format for OTLP traces
@@ -48,21 +41,6 @@ type ProcessorLangfuse struct {
 	OtlpFormat  OtlpOutputFormat // OTLP output format (none/proto/json)
 
 	context pipeline.Context
-}
-
-// TraceData represents the input JSON object structure
-type TraceData struct {
-	Attributes map[string]interface{} `json:"attributes"`
-	Context    map[string]interface{} `json:"context"`
-	EndTime    string                 `json:"end_time"`
-	Events     []interface{}          `json:"events"`
-	Kind       string                 `json:"kind"`
-	Links      []interface{}          `json:"links"`
-	Name       string                 `json:"name"`
-	ParentID   string                 `json:"parent_id"`
-	Resource   map[string]interface{} `json:"resource"`
-	StartTime  string                 `json:"start_time"`
-	Status     interface{}            `json:"status"`
 }
 
 const pluginName = "processor_langfuse"
@@ -92,7 +70,7 @@ func (p *ProcessorLangfuse) Process(in *models.PipelineGroupEvents, context pipe
 
 	var convertedEvents []models.PipelineEvent
 	for i := range in.Events {
-		converted, err := p.convertEvent(in.Events[i])
+		converted, err := p.convertEvent(in.Events[i], in.Group)
 		if err != nil {
 			logger.Warning(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "convert event error", err)
 			if !p.IgnoreError {
@@ -117,10 +95,10 @@ func (p *ProcessorLangfuse) Process(in *models.PipelineGroupEvents, context pipe
 	}
 }
 
-func (p *ProcessorLangfuse) convertEvent(event models.PipelineEvent) ([]models.PipelineEvent, error) {
+func (p *ProcessorLangfuse) convertEvent(event models.PipelineEvent, group *models.GroupInfo) ([]models.PipelineEvent, error) {
 	switch e := event.(type) {
 	case models.ByteArray:
-		return p.convertByteArray(e)
+		return p.convertByteArray(e, group)
 	case *models.Log:
 		return p.convertLog(e)
 	default:
@@ -128,41 +106,38 @@ func (p *ProcessorLangfuse) convertEvent(event models.PipelineEvent) ([]models.P
 	}
 }
 
-func (p *ProcessorLangfuse) convertByteArray(data models.ByteArray) ([]models.PipelineEvent, error) {
-	// Create OTLP Trace structure
-	traces := ptrace.NewTraces()
-	resourceSpans := traces.ResourceSpans().AppendEmpty()
-
-	// Add service name and other resource attributes
-	resourceAttrs := resourceSpans.Resource().Attributes()
-	resourceAttrs.PutStr("service.name", p.ServiceName)
-
-	// Create ScopeSpans
-	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
-	scopeSpans.Scope().SetName("loongcollector")
-	scopeSpans.Scope().SetVersion("1.0.0")
-
-	// Try to parse the JSON data
-	var traceData TraceData
-	err := json.Unmarshal(data, &traceData)
-	if err == nil {
-		// Convert object to Span
-		if err := p.addSpanFromTraceData(traceData, scopeSpans); err != nil {
-			return nil, fmt.Errorf("failed to create span from JSON object: %v", err)
+func (p *ProcessorLangfuse) convertByteArray(data models.ByteArray, group *models.GroupInfo) ([]models.PipelineEvent, error) {
+	var converter TraceConverter
+	if group != nil && group.Metadata != nil {
+		if v := group.Metadata.Get(models.KafkaMsgKey); v != "" {
+			converter = GetTraceConverter(p.context, v)
+			if converter == nil {
+				logger.Error(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "no converter found for kafka message key", "key", v)
+				return []models.PipelineEvent{data}, nil
+			}
+		} else {
+			logger.Error(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "no kafka message key found in group metadata")
+			return []models.PipelineEvent{data}, nil
 		}
 	} else {
-		// Try to parse as JSON array
-		var traceDataArray []TraceData
-		if err := json.Unmarshal(data, &traceDataArray); err != nil {
-			return nil, fmt.Errorf("failed to parse input as JSON: %v", err)
-		}
+		logger.Error(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "no group metadata found")
+		return []models.PipelineEvent{data}, nil
+	}
 
-		// Process each object in the array
-		for _, traceData := range traceDataArray {
-			if err := p.addSpanFromTraceData(traceData, scopeSpans); err != nil {
-				logger.Warning(p.context.GetRuntimeContext(), "LANGFUSE_PROCESSOR_ALARM", "create span error", err)
-				continue
-			}
+	traces, err := converter.Convert(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert trace data: %v", err)
+	}
+
+	for i := 0; i < traces.ResourceSpans().Len(); i++ {
+		resourceSpans := traces.ResourceSpans().At(i)
+		// Add service name and other resource attributes
+		resourceAttrs := resourceSpans.Resource().Attributes()
+		resourceAttrs.PutStr("serviceName", p.ServiceName)
+		for j := 0; j < resourceSpans.ScopeSpans().Len(); j++ {
+			scopeSpans := resourceSpans.ScopeSpans().At(j)
+			scopeSpans.Scope().SetName("loongcollector")
+			scopeSpans.Scope().SetVersion("1.0.0")
 		}
 	}
 
@@ -195,310 +170,6 @@ func (p *ProcessorLangfuse) convertByteArray(data models.ByteArray) ([]models.Pi
 func (p *ProcessorLangfuse) convertLog(log *models.Log) ([]models.PipelineEvent, error) {
 	// TODO: Implement log conversion logic if needed
 	return []models.PipelineEvent{log}, nil
-}
-
-func (p *ProcessorLangfuse) addSpanFromTraceData(traceData TraceData, scopeSpans ptrace.ScopeSpans) error {
-	span := scopeSpans.Spans().AppendEmpty()
-
-	// 1. Process basic fields
-	// Parse trace_id, span_id, parent_id
-	var traceID, spanID, parentID string
-
-	// Get trace_id and span_id from Context
-	if traceData.Context != nil {
-		if tid, ok := traceData.Context["trace_id"].(string); ok {
-			traceID = strings.TrimPrefix(tid, "0x")
-		}
-		if sid, ok := traceData.Context["span_id"].(string); ok {
-			spanID = strings.TrimPrefix(sid, "0x")
-		}
-	}
-
-	// Get parent_id
-	if traceData.ParentID != "" {
-		parentID = strings.TrimPrefix(traceData.ParentID, "0x")
-	}
-
-	// Set span basic properties
-	if traceIDBytes, err := hexToTraceID(traceID); err == nil {
-		span.SetTraceID(pcommon.TraceID(traceIDBytes))
-	}
-
-	if spanIDBytes, err := hexToSpanID(spanID); err == nil {
-		span.SetSpanID(pcommon.SpanID(spanIDBytes))
-	}
-
-	if parentIDBytes, err := hexToSpanID(parentID); err == nil && parentID != "" {
-		span.SetParentSpanID(pcommon.SpanID(parentIDBytes))
-	}
-
-	// Set name and type
-	if traceData.Name != "" {
-		span.SetName(traceData.Name)
-	} else {
-		span.SetName("unknown")
-	}
-
-	// Set Span kind
-	if traceData.Kind != "" {
-		switch strings.ToUpper(traceData.Kind) {
-		case "CLIENT", "SPAN_KIND_CLIENT":
-			span.SetKind(ptrace.SpanKindClient)
-		case "SERVER", "SPAN_KIND_SERVER":
-			span.SetKind(ptrace.SpanKindServer)
-		case "PRODUCER", "SPAN_KIND_PRODUCER":
-			span.SetKind(ptrace.SpanKindProducer)
-		case "CONSUMER", "SPAN_KIND_CONSUMER":
-			span.SetKind(ptrace.SpanKindConsumer)
-		case "INTERNAL", "SPAN_KIND_INTERNAL":
-			span.SetKind(ptrace.SpanKindInternal)
-		default:
-			span.SetKind(ptrace.SpanKindUnspecified)
-		}
-	}
-
-	// Set timestamps
-	startTimeNano := parseTimestamp(traceData.StartTime)
-	endTimeNano := parseTimestamp(traceData.EndTime)
-
-	// Ensure end time is greater than start time
-	if endTimeNano <= startTimeNano {
-		endTimeNano = startTimeNano + 1000000 // Add 1ms if no valid end time
-	}
-
-	span.SetStartTimestamp(pcommon.Timestamp(startTimeNano))
-	span.SetEndTimestamp(pcommon.Timestamp(endTimeNano))
-
-	// 2. Process attributes
-	attributes := span.Attributes()
-	if traceData.Attributes != nil {
-		addAttributesToSpan(attributes, traceData.Attributes)
-
-		// 3. Add Langfuse-specific attributes
-		// These mappings are based on what Langfuse's OpenTelemetry consumer expects
-		// Reference: https://langfuse.com/docs/opentelemetry/get-started
-
-		// Model name mapping
-		if model, ok := traceData.Attributes["model_name"].(string); ok {
-			attributes.PutStr("gen_ai.request.model", model)
-		} else if model, ok := traceData.Attributes["model"].(string); ok {
-			attributes.PutStr("gen_ai.request.model", model)
-		}
-
-		// Input/output mapping
-		if input, ok := traceData.Attributes["input"].(string); ok {
-			attributes.PutStr("gen_ai.prompt", input)
-		}
-
-		if output, ok := traceData.Attributes["output"].(string); ok {
-			attributes.PutStr("gen_ai.completion", output)
-		}
-
-		// Token usage mapping
-		if inputTokens, ok := getTokenCount(traceData.Attributes, "input_tokens"); ok {
-			attributes.PutInt("gen_ai.usage.prompt_tokens", inputTokens)
-		}
-
-		if outputTokens, ok := getTokenCount(traceData.Attributes, "output_tokens"); ok {
-			attributes.PutInt("gen_ai.usage.completion_tokens", outputTokens)
-		}
-
-		// Latency mapping
-		if latency, ok := getLatency(traceData.Attributes, "latency"); ok {
-			attributes.PutDouble("gen_ai.latency_ms", latency)
-		}
-
-		// User ID and session ID mapping
-		if userID, ok := traceData.Attributes["user_id"].(string); ok {
-			attributes.PutStr("user.id", userID)
-		}
-
-		if convID, ok := traceData.Attributes["conversation_id"].(string); ok {
-			attributes.PutStr("session.id", convID)
-		}
-	}
-
-	// 4. Set status
-	if traceData.Status != nil {
-		// If status is a string
-		if statusStr, ok := traceData.Status.(string); ok {
-			if strings.ToUpper(statusStr) == "ERROR" {
-				span.Status().SetCode(ptrace.StatusCodeError)
-			} else {
-				span.Status().SetCode(ptrace.StatusCodeOk)
-			}
-		} else if statusMap, ok := traceData.Status.(map[string]interface{}); ok {
-			// If status is an object
-			if statusCode, ok := statusMap["status_code"].(string); ok {
-				if strings.ToUpper(statusCode) == "ERROR" {
-					span.Status().SetCode(ptrace.StatusCodeError)
-				} else {
-					span.Status().SetCode(ptrace.StatusCodeOk)
-				}
-			}
-		}
-	} else {
-		span.Status().SetCode(ptrace.StatusCodeOk)
-	}
-
-	return nil
-}
-
-// Convert hex string to appropriate byte array based on specified length
-func hexToTraceID(hexStr string) ([16]byte, error) {
-	var result [16]byte
-
-	if hexStr == "" {
-		return result, nil
-	}
-
-	// Ensure string length is 32 (16 bytes)
-	if len(hexStr) != 32 {
-		hexStr = strings.Repeat("0", 32-len(hexStr)) + hexStr
-	}
-
-	// Parse byte by byte
-	for i := 0; i < 16; i++ {
-		start := i * 2
-		end := start + 2
-		if end > len(hexStr) {
-			end = len(hexStr)
-		}
-
-		b, err := strconv.ParseUint(hexStr[start:end], 16, 8)
-		if err != nil {
-			return result, err
-		}
-
-		result[i] = byte(b)
-	}
-
-	return result, nil
-}
-
-func hexToSpanID(hexStr string) ([8]byte, error) {
-	var result [8]byte
-
-	if hexStr == "" {
-		return result, nil
-	}
-
-	// Ensure string length is 16 (8 bytes)
-	if len(hexStr) != 16 {
-		hexStr = strings.Repeat("0", 16-len(hexStr)) + hexStr
-	}
-
-	// Parse byte by byte
-	for i := 0; i < 8; i++ {
-		start := i * 2
-		end := start + 2
-		if end > len(hexStr) {
-			end = len(hexStr)
-		}
-
-		b, err := strconv.ParseUint(hexStr[start:end], 16, 8)
-		if err != nil {
-			return result, err
-		}
-
-		result[i] = byte(b)
-	}
-
-	return result, nil
-}
-
-// Parse timestamp string to nanosecond timestamp
-func parseTimestamp(tsStr string) uint64 {
-	if tsStr == "" {
-		return uint64(time.Now().UnixNano())
-	}
-
-	// Try parsing RFC3339 format
-	if t, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
-		return uint64(t.UnixNano())
-	}
-
-	// Try parsing scientific notation format
-	var ts float64
-	if _, err := fmt.Sscanf(tsStr, "%e", &ts); err == nil {
-		return uint64(ts)
-	}
-
-	// Try parsing integer format
-	if ts, err := strconv.ParseUint(tsStr, 10, 64); err == nil {
-		// Check if it's a second-level timestamp (less than 10^12)
-		if ts < 1_000_000_000_000 {
-			return ts * 1_000_000_000 // Convert to nanoseconds
-		}
-		return ts
-	}
-
-	// Default to current time
-	return uint64(time.Now().UnixNano())
-}
-
-// Add attributes to Span
-func addAttributesToSpan(attrs pcommon.Map, values map[string]interface{}) {
-	for k, v := range values {
-		switch val := v.(type) {
-		case string:
-			attrs.PutStr(k, val)
-		case bool:
-			attrs.PutBool(k, val)
-		case int:
-			attrs.PutInt(k, int64(val))
-		case int64:
-			attrs.PutInt(k, val)
-		case float64:
-			attrs.PutDouble(k, val)
-		case map[string]interface{}:
-			jsonBytes, _ := json.Marshal(val)
-			attrs.PutStr(k, string(jsonBytes))
-		case []interface{}:
-			jsonBytes, _ := json.Marshal(val)
-			attrs.PutStr(k, string(jsonBytes))
-		default:
-			attrs.PutStr(k, fmt.Sprintf("%v", val))
-		}
-	}
-}
-
-// Extract token count from attributes
-func getTokenCount(attrs map[string]interface{}, key string) (int64, bool) {
-	if val, ok := attrs[key]; ok {
-		switch v := val.(type) {
-		case float64:
-			return int64(v), true
-		case int:
-			return int64(v), true
-		case int64:
-			return v, true
-		case string:
-			if count, err := strconv.ParseInt(v, 10, 64); err == nil {
-				return count, true
-			}
-		}
-	}
-	return 0, false
-}
-
-// Extract latency from attributes
-func getLatency(attrs map[string]interface{}, key string) (float64, bool) {
-	if val, ok := attrs[key]; ok {
-		switch v := val.(type) {
-		case float64:
-			return v, true
-		case int:
-			return float64(v), true
-		case int64:
-			return float64(v), true
-		case string:
-			if latency, err := strconv.ParseFloat(v, 64); err == nil {
-				return latency, true
-			}
-		}
-	}
-	return 0, false
 }
 
 func (p *ProcessorLangfuse) ProcessLogs(logArray []*protocol.Log) []*protocol.Log {
